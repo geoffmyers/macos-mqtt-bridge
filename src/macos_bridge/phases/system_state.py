@@ -81,7 +81,8 @@ _SSID_LOCATION_DENIED = "(location services denied)"
 # spamming the log every tick would be obnoxious. Once per ~5 min is
 # enough to be actionable.
 _SSID_LOCATION_WARN_EVERY_SECONDS = 300.0
-_last_location_warn_at: float = 0.0
+# None until the first warning (monotonic() counts from boot; see location.py).
+_last_location_warn_at: float | None = None
 
 
 def _wifi_ssid(interface: str) -> str | None:
@@ -129,7 +130,8 @@ def _maybe_warn_location_denied() -> None:
     global _last_location_warn_at
     import time as _time
     now = _time.monotonic()
-    if now - _last_location_warn_at < _SSID_LOCATION_WARN_EVERY_SECONDS:
+    if (_last_location_warn_at is not None
+            and now - _last_location_warn_at < _SSID_LOCATION_WARN_EVERY_SECONDS):
         return
     _last_location_warn_at = now
     logger.warning(

@@ -8,6 +8,7 @@ host running pytest.
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -126,6 +127,24 @@ def test_failure_payload_publishes_nothing_and_warns_once(
     assert any(
         "authorization_denied" in r.getMessage() for r in caplog.records
     )
+
+
+def test_first_denied_warning_is_not_swallowed_just_after_boot(
+    monkeypatch: pytest.MonkeyPatch, fake_mqtt: MagicMock, caplog: pytest.LogCaptureFixture
+):
+    """time.monotonic() counts from boot. A throttle that started at 0.0
+    swallowed the first warning for 30 minutes after a reboot (and on
+    freshly started CI machines)."""
+    monkeypatch.setattr(
+        location, "_spawn_helper", lambda *a, **kw: {"ok": False, "error": "authorization_denied"}
+    )
+    # Only this module's clock: patching time.monotonic itself would stall
+    # the event loop.
+    monkeypatch.setattr(location, "time", SimpleNamespace(monotonic=lambda: 5.0))
+    caplog.set_level("WARNING", logger="macos_bridge.phases.location")
+    asyncio.run(_ticker().run_once(fake_mqtt))
+
+    assert any("authorization_denied" in r.getMessage() for r in caplog.records)
 
 
 def test_denied_warning_is_throttled(

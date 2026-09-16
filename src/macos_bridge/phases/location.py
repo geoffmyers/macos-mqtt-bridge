@@ -173,7 +173,9 @@ class LocationTicker(AbstractTicker):
         self._home_latitude = home_latitude
         self._home_longitude = home_longitude
         self._home_radius_meters = home_radius_meters
-        self._last_denied_warn_at: float = 0.0
+        # None until the first warning: monotonic() counts from boot, so a
+        # 0.0 start silenced the first warning for 30 min after a reboot.
+        self._last_denied_warn_at: float | None = None
 
     @property
     def enabled(self) -> bool:
@@ -216,7 +218,8 @@ class LocationTicker(AbstractTicker):
 
     def _maybe_warn_denied(self, reason: str) -> None:
         now = time.monotonic()
-        if now - self._last_denied_warn_at < _DENIED_WARN_EVERY_SECONDS:
+        if (self._last_denied_warn_at is not None
+                and now - self._last_denied_warn_at < _DENIED_WARN_EVERY_SECONDS):
             return
         self._last_denied_warn_at = now
         logger.warning(

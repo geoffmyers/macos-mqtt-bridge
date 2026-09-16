@@ -155,7 +155,7 @@ def test_phase_f_wifi_ssid_replaces_redacted_with_actionable_label(
     # Reset the warn-throttle so the test always exercises the warn path,
     # regardless of whether a previous test in this run already tripped it.
     from macos_bridge.phases import system_state
-    system_state._last_location_warn_at = 0.0
+    system_state._last_location_warn_at = None
 
     asyncio.run(_ticker().run_once(fake_mqtt))
     p = {c.args[0]: c.args[1] for c in fake_mqtt.publish_state.call_args_list}
