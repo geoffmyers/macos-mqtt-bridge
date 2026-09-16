@@ -1,0 +1,49 @@
+[project]
+name = "macos-mqtt-bridge"
+version = "0.1.0"
+description = "Unified macOS → MQTT bridge: Messages/Phone/FaceTime/Voicemail events + Screen Time / system / host metrics, with Home Assistant MQTT discovery"
+requires-python = ">=3.12"
+dependencies = [
+    "ha-mqtt-bridge-toolkit[yaml]>=0.4.0",
+    "paho-mqtt>=2.1.0",
+    "pydantic>=2.7.0",
+    "python-github-error-reporter>=0.1.0",
+    "pyyaml>=6.0.1",
+]
+
+[project.scripts]
+macos-mqtt-bridge = "macos_bridge.cli:main"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.2.0",
+    "pytest-asyncio>=0.23.0",
+    "hypothesis>=6.100.0",
+    "ruff>=0.4.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/macos_bridge"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "SIM", "RUF"]
+
+# uv resolves ha-mqtt-bridge-toolkit from its path
+# rather than from PyPI. `uv pip install -e .` honors this source
+# (uv 0.5+). For other installers, install the toolkit explicitly
+# beforehand: `pip install -e ./_shared/ha-mqtt-bridge-toolkit`.
+[tool.uv.sources]
+ha-mqtt-bridge-toolkit = { path = "./_shared/ha-mqtt-bridge-toolkit", editable = true }
+python-github-error-reporter = { path = "./_shared/python-github-error-reporter", editable = true }

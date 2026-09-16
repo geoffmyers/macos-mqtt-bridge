@@ -1,0 +1,341 @@
+# config.example.yaml
+# Copy to config.yaml and edit. config.yaml is gitignored.
+#
+# Single configuration for the merged macOS → MQTT bridge:
+#   - Comms event sources: Messages, Phone, FaceTime, Voicemail
+#   - Realtime call observer (Swift CXCallObserver subprocess)
+#   - Outbound iMessage/SMS via osascript
+#   - Screen Time / system / host metrics phase tickers (a–g)
+
+bridge:
+  hostname: my-mac                                # used in topic prefix; default = `hostname -s` slugified
+  log_level: info
+  log_path: ~/Library/Logs/macos-mqtt-bridge.log
+  state_path: ~/Library/Application Support/macos-mqtt-bridge/state.json
+  tmp_dir: /tmp/macos-mqtt-bridge
+  poll_interval_seconds: 3                        # comms-source poll cadence
+
+mqtt:
+  host: mqtt.example.com
+  port: 8883
+  tls: true
+  ca_file: /etc/ssl/cert.pem
+  username_env: MQTT_USERNAME                     # value resolved from env at startup
+  password_env: MQTT_PASSWORD
+  client_id: macos-mqtt-bridge-my-mac
+  topic_prefix: macos                             # final topics: comms under <prefix>/<host>/comms/..., phase tickers flat under <prefix>/<host>/...
+  discovery_prefix: homeassistant
+  keepalive: 60
+  lwt_topic: macos/my-mac/status
+  lwt_online: online
+  lwt_offline: offline
+  event_qos: 1                                    # comms event QoS (also LWT)
+  state_qos: 0                                    # phase publish_state QoS
+  discovery_qos: 1                                # HA discovery publish QoS
+  retain_events: false                            # comms events are point-in-time, not state
+  retain_state: true                              # phase state-mirror topics retain
+  discovery_enabled: true                         # publish HA discovery configs
+
+contacts:
+  enabled: true
+  address_book_dir: ~/Library/Application Support/AddressBook
+  include_photo: true
+  # Photo field: "thumbnail" (~10-15 KB) | "full" (100+ KB) | "thumbnail_or_full"
+  photo_field: thumbnail
+
+outbound:
+  # Subscribe to <prefix>/<host>/comms/messages/send and run osascript against
+  # Messages.app's scripting dictionary. Result published to
+  # <prefix>/<host>/comms/messages/send_result. Requires Automation permission.
+  enabled: true
+  osascript_path: osascript
+
+realtime_calls:
+  # Spawn the Swift CXCallObserver helper for real-time phone state transitions.
+  # Build the binary once with: helpers/call-observer/build.sh
+  enabled: true
+  binary_path: ./helpers/call-observer/.build/release/CallObserver
+
+sources:
+  messages:
+    enabled: true
+    db_path: ~/Library/Messages/chat.db
+    include_text: true                            # set false to omit message body (privacy)
+    include_attributed_body_fallback: true        # extract plain text from attributedBody when text is NULL
+
+  calls:
+    enabled: true
+    db_path: ~/Library/Application Support/CallHistoryDB/CallHistory.storedata
+    emit_started_event: true                      # synthetic "started" event backdated by ZDURATION
+    facetime_service_substrings:
+      - facetime
+      - avconference
+    phone_service_substrings:
+      - telephony
+
+  voicemail:
+    enabled: true
+    # macOS 26: voicemails live in the FaceTime/Phone shared message store.
+    db_path: ~/Library/Group Containers/group.com.apple.FaceTime/com.apple.facetimemessagestored/Data Store/FaceTimeMessageStore-local.sqlitedb
+    assets_dir: ~/Library/Group Containers/group.com.apple.FaceTime/com.apple.facetimemessagestored/Data Store/Assets
+    audio_extensions: [amr, m4a, caf, wav, mp3, aac]
+    include_audio_path: true                      # include local audio file path in payload
+    include_deleted: false                        # ZMAILBOXTYPE=2 is trash; default skips them
+
+# ---- Phase ticker source paths (Screen Time / knowledgeC.db) -----------------
+phase_sources:
+  knowledge_db: ~/Library/Application Support/Knowledge/knowledgeC.db
+  rm_admin_local: ${DARWIN_USER_DIR}/com.apple.ScreenTimeAgent/Store/RMAdminStore-Local.sqlite
+  rm_admin_cloud: ${DARWIN_USER_DIR}/com.apple.ScreenTimeAgent/Store/RMAdminStore-Cloud.sqlite
+
+# ---- Phase tickers ---------------------------------------------------------
+
+aggregates:
+  # Daily headline aggregates: total hours, pickups, top app, top app hours.
+  enabled: true
+  interval_seconds: 900
+
+per_app:
+  # Per-app daily usage from a curated allow-list. Bootstrap with:
+  #   .venv/bin/python -m macos_bridge --config config.yaml bootstrap-allowlist
+  enabled: true
+  interval_seconds: 60
+  apps:
+    - bundle_id: com.apple.Safari
+      friendly_name: Safari
+      icon: mdi:apple-safari
+    - bundle_id: com.google.Chrome
+      friendly_name: Google Chrome
+      icon: mdi:google-chrome
+    - bundle_id: com.microsoft.VSCode
+      friendly_name: Visual Studio Code
+      icon: mdi:microsoft-visual-studio-code
+    - bundle_id: com.apple.mail
+      friendly_name: Mail
+      icon: mdi:email
+    - bundle_id: com.apple.MobileSMS
+      friendly_name: Messages
+      icon: mdi:message-text
+    - bundle_id: com.apple.FaceTime
+      friendly_name: FaceTime
+      icon: mdi:video-account
+    - bundle_id: com.apple.Music
+      friendly_name: Music
+      icon: mdi:music-circle
+    - bundle_id: com.apple.Photos
+      friendly_name: Photos
+      icon: mdi:image-multiple
+    - bundle_id: com.apple.finder
+      friendly_name: Finder
+      icon: mdi:folder
+    - bundle_id: com.apple.systempreferences
+      friendly_name: System Settings
+      icon: mdi:cog
+    - bundle_id: com.apple.loginwindow
+      friendly_name: Login Window
+      icon: mdi:login
+
+focused_app:
+  # Live currently-focused app via lsappinfo (no FDA / Accessibility needed
+  # for the bundle ID; window title + AXDocument extras require Accessibility).
+  enabled: true
+  poll_interval_seconds: 3
+  publish_locked_state: true
+
+brave_history:
+  # Per-VISIT browsing events from Brave's Chromium History DB. Each of
+  # today's page views (real visit_time + visit_duration) is published per
+  # profile as one retained JSON blob to
+  #   macos/<host>/today/web/<profile>
+  # for any consumer that wants per-visit browsing time (a time tracker, for
+  # example: each visit carries its real start and duration). Reads a WAL-safe snapshot copy, so it is safe to run
+  # while Brave is open. Requires Full Disk Access (the History DB lives under
+  # ~/Library/Application Support).
+  enabled: true
+  interval_seconds: 900
+  # brave_home: ~/Library/Application Support/BraveSoftware/Brave-Browser
+  max_visits_per_profile: 5000
+
+family:
+  # Synced cross-device Screen Time (Family Sharing). Disabled — the
+  # surfaced family devices and per-member sensors are out of scope for
+  # the bridge's current use case. Re-enable by setting both flags to true
+  # if you want HA to track other family members' device usage.
+  enabled: false
+  is_family_organizer: false
+  interval_seconds: 300
+  members: []                                     # empty = surface all discovered family users
+
+activity:
+  # Activity binary sensors: camera, mic, audio, input idle.
+  enabled: true
+  interval_seconds: 5
+  input_active_threshold_seconds: 5
+  camera_log_window_seconds: 10
+  microphone_log_window_seconds: 10
+
+system_state:
+  # System state: Wi-Fi SSID, Bluetooth, brightness, volume, lid, battery.
+  enabled: true
+  interval_seconds: 30
+  wifi_interface: en0
+
+host_metrics:
+  # Host metrics: CPU, memory, disk, load, boot time.
+  enabled: true
+  interval_seconds: 30
+  disk_mount: /System/Volumes/Data
+
+today_counters:
+  # Counters that reset at local midnight: messages received/sent today,
+  # phone calls today, FaceTime calls today, voicemails today. Reads from
+  # the same chat.db / CallHistory.storedata / FaceTimeMessageStore-local
+  # databases as the comms event sources.
+  enabled: true
+  interval_seconds: 60
+
+virtual_meetings:
+  # Detect virtual meetings (Zoom, Teams, FaceTime, Google Meet in
+  # browsers) by inspecting per-process pmset assertions. The meeting
+  # app does NOT need to be in the foreground — detection works on any
+  # candidate process holding a media-class assertion.
+  #
+  # end_grace_ticks: when detection drops, wait this many consecutive
+  # negative ticks before flipping in_progress=OFF. At interval_seconds=5
+  # the default of 2 means 10s of "no meeting" must elapse — protects
+  # against momentary pmset gaps mid-meeting.
+  enabled: true
+  interval_seconds: 5
+  end_grace_ticks: 2
+
+permissions:
+  # Probe and report the macOS TCC permissions the bridge currently
+  # holds (Full Disk Access, Accessibility, Automation for Messages,
+  # Location Services). Slow cadence — only changes when the user
+  # toggles them in System Settings → Privacy & Security.
+  enabled: true
+  interval_seconds: 300
+
+focus_mode:
+  # macOS Focus mode (DND / Work / Sleep / Personal / etc.) read from the
+  # local DoNotDisturb assertions store. No shell call.
+  enabled: true
+  interval_seconds: 10
+
+unread_messages:
+  # Total unread iMessage / SMS count from chat.db, plus a per-chat
+  # breakdown via attrs.
+  enabled: true
+  interval_seconds: 30
+
+software_updates:
+  # Pending macOS updates from `softwareupdate -l --no-scan`. Fast
+  # cached read — macOS does its own background scan periodically.
+  enabled: true
+  interval_seconds: 3600
+
+tailscale:
+  # Tailscale connectivity from `tailscale status --json`. Skips silently
+  # when the CLI isn't on PATH.
+  enabled: true
+  interval_seconds: 60
+
+time_machine:
+  # Time Machine state from `tmutil status` and `tmutil latestbackup`.
+  enabled: true
+  interval_seconds: 300
+
+displays:
+  # External display enumeration from system_profiler SPDisplaysDataType.
+  # Drives "am I docked at the desk" automations.
+  enabled: true
+  interval_seconds: 30
+
+security_posture:
+  # FileVault, Application Firewall, and SIP enabled-status flags.
+  enabled: true
+  interval_seconds: 300
+
+system_info:
+  # Static identity diagnostics: macOS version + build, kernel, model,
+  # serial number, hardware UUID, computer name, chip, cores, memory and
+  # storage capacity. Values change only across an OS upgrade.
+  enabled: true
+  interval_seconds: 3600
+
+now_playing:
+  # Currently-playing media. Prefers `nowplaying-cli` if installed
+  # (`brew install nowplaying-cli`); otherwise falls back to AppleScript
+  # probes against Music.app and Spotify.app (only when those apps are
+  # already running, to avoid launching them just to check).
+  enabled: true
+  interval_seconds: 5
+
+controls:
+  # Inbound HA controls — buttons, switches, numbers, selects, text
+  # inputs that turn into shell calls on this Mac. Each control gets
+  # an HA discovery entity; HA publishes commands to a per-control
+  # topic; the bridge subscribes and runs the matching osascript /
+  # shell command.
+  #
+  # Per-control flags let you disable any one. DESTRUCTIVE actions
+  # (sleep / restart / shutdown) default to FALSE so a compromised
+  # broker can't trivially nuke the machine — flip to true to opt
+  # in.
+  enabled: true
+  # Audio
+  volume: true            # number 0-100
+  mute: true              # switch (state syncs from system_state)
+  # Display / session
+  lock_screen: true       # button — pmset displaysleepnow
+  screensaver: true       # button — open -a ScreenSaverEngine
+  caffeinate: true        # switch — manage caffeinate -di subprocess
+  # Notifications / TTS / URL
+  display_notification: true  # text — osascript display notification
+  speak: true                 # text — say
+  open_url: true              # text — open <url> (http/https/mailto/tel)
+  # Media (uses nowplaying-cli if installed; brew install nowplaying-cli)
+  media_controls: true        # play/pause / next / previous buttons
+  # DESTRUCTIVE — opt-in
+  sleep: false
+  restart: false
+  shutdown: false
+
+location:
+  # CoreLocation lat/lon + accuracy + reverse-geocoded address (city,
+  # state, country, postal code) via the Swift LocationFetcher.app
+  # helper. Apple rate-limits CLGeocoder to ~50/hour, so don't push
+  # the cadence below ~120s. Default 5 minutes.
+  enabled: true
+  interval_seconds: 300
+  # Home zone for the device_tracker entity. HA's MQTT device_tracker
+  # requires its state to be "home" / "not_home" / a known zone name —
+  # set these so the bridge can compute home/away from each fix. When
+  # unset, the bridge publishes "home" always (correct for a desk-bound
+  # Mac, wrong for a laptop you carry around). Easiest way to find
+  # your home coordinates: check the Location - Latitude / Longitude
+  # sensors in HA while the Mac is sitting at home.
+  # (example values: the Empire State Building)
+  # home_latitude: 40.74844
+  # home_longitude: -73.98566
+  # home_radius_meters: 100  # default — matches HA's home zone default
+
+audio_hijack:
+  # Automatically start/stop Audio Hijack recording sessions when virtual
+  # meetings or phone calls begin and end.
+  #
+  # Audio Hijack must already be running (set it to open at login via
+  # Audio Hijack > Preferences). The bridge controls it via AppleScript.
+  #
+  # Session names must match exactly what appears in Audio Hijack's session
+  # list. Set a value to null (or omit the key) to skip that trigger.
+  #
+  # auto_stop: only stop sessions the bridge started — won't cut off a
+  # session you started manually from Audio Hijack's UI.
+  enabled: true
+  zoom_session: "Record Zoom Meeting"
+  teams_session: "Record Microsoft Teams Meeting"
+  facetime_session: "Record FaceTime Call"
+  browser_session: "Record Browser Meeting"     # Brave Browser (Google Meet)
+  phone_session: "Record Phone Call"
+  auto_stop: true

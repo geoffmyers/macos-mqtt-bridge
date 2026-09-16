@@ -1,0 +1,23 @@
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+.pytest_cache/
+.ruff_cache/
+.hypothesis/
+*.egg-info/
+config.yaml
+.env
+/dist/
+/build/
+
+# Real macOS databases used for local testing. NEVER commit — contains
+# personal messages, call history, voicemails, contacts. Tests reference
+# files under tmp/ via env var MACOS_BRIDGE_FIXTURE_DIR.
+tmp/
+
+# Swift build output for the CallObserver helper
+helpers/call-observer/.build/
+
+# Swift build output for the LocationFetcher helper
+helpers/location-fetcher/.build/
