@@ -18,7 +18,8 @@ same way.
 | `topics` | `slugify()`, `slugify_hostname()`, `state_topic()`, `discovery_topic()`, `event_topic()` — topic + identifier string helpers. |
 | `time_utils` | `epoch_to_iso()`, `epoch_ms_to_iso()`, `iso_now()`, `iso_from_monotonic()` — ISO-8601 UTC formatting with ms precision. |
 | `outbox` | `Outbox` — disk-backed JSONL FIFO queue with size cap, drain-on-ACK, head-of-line preservation. Survives process restarts. |
-| `paho_publisher` | `ThreadedPublisher` — paho-mqtt v5 wrapper with LWT, subscribe map, and five publish flavors (`publish_event` / `publish_event_with_ack` / `publish_state` / `publish_attributes` / `publish_discovery` / `publish_raw`). Subclass for bridge-specific behavior. |
+| `paho_publisher` | `ThreadedPublisher` — paho-mqtt v5 wrapper with LWT, optional TLS (`tls=`, `ca_file=`), subscribe map, and five publish flavors (`publish_event` / `publish_event_with_ack` / `publish_state` / `publish_attributes` / `publish_discovery` / `publish_raw`). Its health file (`health_path`) is touched only while the broker is connected, so a file-age healthcheck fails when the broker goes away. `watch_ha_birth()` calls back whenever Home Assistant publishes `online` on `<prefix>/status`, so a bridge can re-send discovery after HA restarts. Subclass for bridge-specific behavior. |
+| `http_retry` | `request_with_backoff()` — one HTTP request with exponential backoff on 429/5xx; raises `RetryExhaustedError` (a `RuntimeError`) when it gives up. Needs the `[http]` extra (`requests`). |
 | `aiomqtt_helpers` | `mqtt_client_kwargs()` — generic builder for `aiomqtt.Client(**kwargs)` construction. For asyncio bridges. |
 | `config_helpers` | `substitute_env_vars()`, `load_yaml_with_env()` — YAML config + `${ENV_VAR}` substitution. PyYAML is loaded lazily; install via the `[yaml]` extra. |
 | `app_helpers` | `configure_logging()`, `register_github_error_reporter()` — process-startup boilerplate every bridge `main()` repeated (uniform `basicConfig` + named logger; optional GitHub error reporter, no-op when its package is absent). |
@@ -31,6 +32,14 @@ same way.
 - `aiomqtt` is NOT a dep — the toolkit's `mqtt_client_kwargs()` builds the
   kwargs dict but doesn't import aiomqtt. The caller imports aiomqtt and
   passes the dict.
+
+## Upgrading a consumer
+
+A Docker image that installs the toolkit at build time keeps the version it was
+built with: restarting the container does not pick up a toolkit change, and
+bridge code that imports something new (such as `http_retry`) fails to start
+until the image is rebuilt. Rebuild and recreate the container after changing
+the toolkit.
 
 ## Usage
 
