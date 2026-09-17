@@ -81,6 +81,8 @@ sources:
     audio_extensions: [amr, m4a, caf, wav, mp3, aac]
     include_audio_path: true                      # include local audio file path in payload
     include_deleted: false                        # ZMAILBOXTYPE=2 is trash; default skips them
+    include_transcription: true                   # set false to omit the decoded transcript (privacy);
+                                                    # applies to both phone voicemails and FaceTime audio messages
 
 # ---- Phase ticker source paths (Screen Time / knowledgeC.db) -----------------
 phase_sources:

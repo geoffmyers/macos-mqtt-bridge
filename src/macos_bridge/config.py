@@ -153,6 +153,11 @@ class VoicemailSource(BaseModel):
     )
     include_audio_path: bool = True
     include_deleted: bool = False
+    # Mirrors sources.messages.include_text: set false to omit the decoded
+    # transcript (privacy) for both phone voicemails (voicemail/received)
+    # and FaceTime audio-message transcripts (facetime/audio_message_received)
+    # — both event kinds are produced by this same source/table.
+    include_transcription: bool = True
     facetime_provider_substrings: list[str] = Field(
         default_factory=lambda: ["facetime"]
     )

@@ -217,3 +217,33 @@ class TestBuildDiscoveryPayload:
             component="sensor",
         )
         assert "component" not in p
+
+    def test_unknown_component_is_not_an_error(self, caplog) -> None:
+        # HA supports components (cover, light, climate, ...) the
+        # toolkit hasn't curated test coverage for — passing one must
+        # not raise or drop the payload, only note it for debugging.
+        import logging
+
+        with caplog.at_level(logging.DEBUG, logger="ha_mqtt_bridge.discovery"):
+            p = build_discovery_payload(
+                name="X",
+                unique_id="u",
+                state_topic="s",
+                device=self.DEVICE,
+                component="climate",
+            )
+        assert p["name"] == "X"
+        assert any("climate" in r.message for r in caplog.records)
+
+    def test_known_component_logs_nothing(self, caplog) -> None:
+        import logging
+
+        with caplog.at_level(logging.DEBUG, logger="ha_mqtt_bridge.discovery"):
+            build_discovery_payload(
+                name="X",
+                unique_id="u",
+                state_topic="s",
+                device=self.DEVICE,
+                component="sensor",
+            )
+        assert caplog.records == []

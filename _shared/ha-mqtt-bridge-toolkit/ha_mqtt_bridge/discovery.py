@@ -16,7 +16,10 @@ keep them keyword-only and Optional with sensible defaults.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
+
+log = logging.getLogger(__name__)
 
 # Reserved component types. HA accepts more (cover, light, fan, etc.) but
 # only these are referenced by the existing bridges. Used purely as a
@@ -224,8 +227,18 @@ def build_discovery_payload(
     # Reference component validation for caller convenience. Skipped if
     # None so callers that don't carry component info aren't penalized.
     if component is not None and component not in KNOWN_COMPONENTS:
-        # Not an error — HA supports many more components than this list.
-        # The toolkit just doesn't have curated test coverage for them.
-        pass
+        # Not an error — HA supports many more components than this list
+        # (cover, light, fan, climate, ...) — the toolkit just doesn't
+        # have curated test coverage for them yet. Logged at debug so a
+        # bridge author who *meant* a known component and mistyped it
+        # (or a stray unique_id crept into the component slot) has
+        # something to grep for without every legitimate-but-uncovered
+        # component spamming production logs at warning level.
+        log.debug(
+            "discovery component %r not in KNOWN_COMPONENTS "
+            "(informational only — HA accepts more than the toolkit "
+            "has test coverage for)",
+            component,
+        )
 
     return payload

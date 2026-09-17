@@ -1,4 +1,4 @@
--- src/screen_time_bridge/queries/phase_a_top_app.sql
+-- src/macos_bridge/queries/top_app.sql
 -- Returns at most one row: (bundle_id, total_seconds) for the most-used app today.
 SELECT
     ZVALUESTRING AS bundle_id,

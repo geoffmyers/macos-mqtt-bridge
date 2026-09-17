@@ -193,8 +193,10 @@ def test_reactions_route_to_reaction_topic(messages_db, state_path):
     assert matching
     event_path, payload = matching[0]
     assert event_path == "messages/reaction"
+    # Names are Title-cased (REACTION_NAMES in sources/messages.py) so they
+    # read naturally as HA entity states ("Loved" rather than "loved").
     assert payload["reaction_kind"] in {
-        "loved", "liked", "disliked", "laughed", "emphasized", "questioned", "sticker"
+        "Loved", "Liked", "Disliked", "Laughed", "Emphasized", "Questioned", "Sticker"
     }
     assert payload["is_remove"] is False
     assert payload["target_guid"] is not None

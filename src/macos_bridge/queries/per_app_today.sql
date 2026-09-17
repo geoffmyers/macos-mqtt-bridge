@@ -1,4 +1,4 @@
--- src/screen_time_bridge/queries/phase_b_per_app_today.sql
+-- src/macos_bridge/queries/per_app_today.sql
 -- Per-app usage seconds today, grouped by bundle_id.
 -- Caller filters to the allow-listed bundle IDs in Python.
 SELECT ZVALUESTRING AS bundle_id,

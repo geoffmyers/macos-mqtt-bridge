@@ -1,4 +1,4 @@
--- src/screen_time_bridge/queries/phase_d_per_pair_today.sql
+-- src/macos_bridge/queries/family_per_pair_today.sql
 -- Per-(user, device) totals since :since_mat (typically start-of-today MAT).
 -- Returns one row per ZUSAGE record. Pairs with no blocks get 0/0.
 SELECT

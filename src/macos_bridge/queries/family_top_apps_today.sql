@@ -1,4 +1,4 @@
--- src/screen_time_bridge/queries/phase_d_top_apps_today.sql
+-- src/macos_bridge/queries/family_top_apps_today.sql
 -- Top apps by total seconds across all family devices since :since_mat.
 SELECT
     ti.ZBUNDLEIDENTIFIER AS bundle_id,

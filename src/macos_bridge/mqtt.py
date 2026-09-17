@@ -168,7 +168,7 @@ class MqttPublisher(ThreadedPublisher):
         return build_device_block(
             identifiers=identifiers,
             name=f"macOS Bridge — {display}",
-            manufacturer="Apple / geoffmyers",
+            manufacturer="Apple",
             model="macos-mqtt-bridge",
             sw_version=self._sw_version,
             serial_number=self._serial_number,

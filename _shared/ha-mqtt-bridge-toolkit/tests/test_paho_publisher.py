@@ -20,7 +20,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from ha_mqtt_bridge.paho_publisher import ThreadedPublisher
+from ha_mqtt_bridge.paho_publisher import ThreadedPublisher, watch_ha_birth
 
 
 @pytest.fixture
@@ -288,44 +288,87 @@ class TestDisconnect:
 
 
 class TestHealthHeartbeat:
-    """Every successful publish_* call bumps health_path's mtime so a
-    Docker healthcheck can declare the bridge unhealthy when polls wedge."""
+    """Every successful publish_* call bumps health_path's mtime — but
+    ONLY while actually connected to the broker, so a healthcheck that
+    just stats the file's mtime can't stay green while the connection
+    is down (the 2026-09-17 bug: the bridge's own polling cadence kept
+    advancing the mtime regardless of whether anything reached a
+    broker, because paho silently drops a publish() call issued while
+    disconnected — no exception, nothing to catch)."""
 
     def test_disabled_by_default(self, fake_paho_client, tmp_path):
         p = _make_publisher()
+        p._connected.set()
         target = tmp_path / "healthy"
         p.publish_state("t/x", "1")
         assert not target.exists()
 
-    def test_state_bumps_mtime(self, fake_paho_client, tmp_path):
+    def test_state_bumps_mtime_when_connected(self, fake_paho_client, tmp_path):
         target = tmp_path / "healthy"
         p = _make_publisher(health_path=str(target))
+        p._connected.set()
         p.publish_state("t/x", "1")
         assert target.exists()
 
-    def test_event_bumps_mtime(self, fake_paho_client, tmp_path):
+    def test_state_does_not_bump_when_disconnected(self, fake_paho_client, tmp_path):
         target = tmp_path / "healthy"
         p = _make_publisher(health_path=str(target))
+        # _connected never set — simulates the broker being down while the
+        # bridge's poll loop keeps calling publish_state() anyway.
+        p.publish_state("t/x", "1")
+        assert not target.exists()
+
+    def test_event_bumps_mtime_when_connected(self, fake_paho_client, tmp_path):
+        target = tmp_path / "healthy"
+        p = _make_publisher(health_path=str(target))
+        p._connected.set()
         p.publish_event("t/e", {"a": 1})
         assert target.exists()
 
-    def test_discovery_bumps_mtime(self, fake_paho_client, tmp_path):
+    def test_event_does_not_bump_when_disconnected(self, fake_paho_client, tmp_path):
         target = tmp_path / "healthy"
         p = _make_publisher(health_path=str(target))
+        p.publish_event("t/e", {"a": 1})
+        assert not target.exists()
+
+    def test_discovery_bumps_mtime_when_connected(self, fake_paho_client, tmp_path):
+        target = tmp_path / "healthy"
+        p = _make_publisher(health_path=str(target))
+        p._connected.set()
         p.publish_discovery(component="sensor", unique_id="u", payload={"x": 1})
         assert target.exists()
 
-    def test_attributes_bumps_mtime(self, fake_paho_client, tmp_path):
+    def test_discovery_does_not_bump_when_disconnected(self, fake_paho_client, tmp_path):
         target = tmp_path / "healthy"
         p = _make_publisher(health_path=str(target))
+        p.publish_discovery(component="sensor", unique_id="u", payload={"x": 1})
+        assert not target.exists()
+
+    def test_attributes_bumps_mtime_when_connected(self, fake_paho_client, tmp_path):
+        target = tmp_path / "healthy"
+        p = _make_publisher(health_path=str(target))
+        p._connected.set()
         p.publish_attributes("t/a", {"k": "v"})
         assert target.exists()
 
-    def test_raw_bumps_mtime(self, fake_paho_client, tmp_path):
+    def test_attributes_does_not_bump_when_disconnected(self, fake_paho_client, tmp_path):
+        target = tmp_path / "healthy"
+        p = _make_publisher(health_path=str(target))
+        p.publish_attributes("t/a", {"k": "v"})
+        assert not target.exists()
+
+    def test_raw_bumps_mtime_when_connected(self, fake_paho_client, tmp_path):
+        target = tmp_path / "healthy"
+        p = _make_publisher(health_path=str(target))
+        p._connected.set()
+        p.publish_raw("t/r", b"")
+        assert target.exists()
+
+    def test_raw_does_not_bump_when_disconnected(self, fake_paho_client, tmp_path):
         target = tmp_path / "healthy"
         p = _make_publisher(health_path=str(target))
         p.publish_raw("t/r", b"")
-        assert target.exists()
+        assert not target.exists()
 
     def test_ack_failure_does_not_bump(self, fake_paho_client, tmp_path):
         target = tmp_path / "healthy"
@@ -350,4 +393,73 @@ class TestHealthHeartbeat:
         # Read-only directory: opening for append raises OSError, which
         # the publisher must swallow rather than blowing up the publish.
         p = _make_publisher(health_path=str(tmp_path / "no/such/dir/healthy"))
+        p._connected.set()
         p.publish_state("t/x", "1")  # must not raise
+
+    def test_reconnect_touches_health_immediately(self, fake_paho_client, tmp_path):
+        # A successful on_connect callback is itself proof of life —
+        # the mtime should be fresh right after a reconnect, not only
+        # after the next publish_* call.
+        target = tmp_path / "healthy"
+        p = _make_publisher(health_path=str(target))
+        on_connect = fake_paho_client.on_connect
+        on_connect(fake_paho_client, None, {}, MagicMock(value=0))
+        assert target.exists()
+
+    def test_failed_connect_does_not_touch_health(self, fake_paho_client, tmp_path):
+        target = tmp_path / "healthy"
+        p = _make_publisher(health_path=str(target))
+        on_connect = fake_paho_client.on_connect
+        on_connect(fake_paho_client, None, {}, MagicMock(value=1))
+        assert not target.exists()
+
+
+class TestWatchHaBirth:
+    """`watch_ha_birth` — opt-in re-publish of discovery (+ bridge state)
+    when HA's own `<discovery_prefix>/status` reports `"online"`."""
+
+    def test_subscribes_to_default_status_topic(self, fake_paho_client):
+        p = _make_publisher()
+        watch_ha_birth(p, lambda: None)
+        assert f"{p.discovery_prefix}/status" in p._subscriptions
+
+    def test_custom_discovery_prefix(self, fake_paho_client):
+        p = _make_publisher(discovery_prefix="ha")
+        watch_ha_birth(p, lambda: None, discovery_prefix="ha")
+        assert "ha/status" in p._subscriptions
+
+    def test_online_payload_invokes_callback(self, fake_paho_client):
+        p = _make_publisher()
+        calls = []
+        watch_ha_birth(p, lambda: calls.append(1))
+        handler = p._subscriptions["homeassistant/status"]
+        handler("homeassistant/status", b"online")
+        assert calls == [1]
+
+    def test_offline_payload_does_not_invoke_callback(self, fake_paho_client):
+        p = _make_publisher()
+        calls = []
+        watch_ha_birth(p, lambda: calls.append(1))
+        handler = p._subscriptions["homeassistant/status"]
+        handler("homeassistant/status", b"offline")
+        assert calls == []
+
+    def test_callback_exception_does_not_propagate(self, fake_paho_client):
+        p = _make_publisher()
+
+        def boom():
+            raise RuntimeError("boom")
+
+        watch_ha_birth(p, boom)
+        handler = p._subscriptions["homeassistant/status"]
+        handler("homeassistant/status", b"online")  # must not raise
+
+    def test_custom_birth_payload(self, fake_paho_client):
+        p = _make_publisher()
+        calls = []
+        watch_ha_birth(p, lambda: calls.append(1), birth_payload="up")
+        handler = p._subscriptions["homeassistant/status"]
+        handler("homeassistant/status", b"online")
+        assert calls == []
+        handler("homeassistant/status", b"up")
+        assert calls == [1]

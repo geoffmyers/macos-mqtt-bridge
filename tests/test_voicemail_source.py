@@ -193,6 +193,38 @@ def test_contact_enrichment_when_resolver_provided(voicemail_db, state_path, con
     assert "full_name" in sample
 
 
+def test_include_transcription_true_by_default(voicemail_db, state_path):
+    cfg = VoicemailConfig()
+    state = State(str(state_path))
+    state.set("voicemail_last_pk", 0)
+    state.set("voicemail_primed", True)
+    state.save()
+
+    source = VoicemailSource(cfg, str(voicemail_db), None)
+    events = list(source.poll(state))
+    assert events
+    assert any("transcription" in payload for _, payload in events)
+
+
+def test_include_transcription_false_omits_transcript(voicemail_db, state_path):
+    """Mirrors sources.messages.include_text: the key is omitted (not null)
+    when disabled, for both event kinds this source emits."""
+    cfg = VoicemailConfig(include_transcription=False)
+    state = State(str(state_path))
+    state.set("voicemail_last_pk", 0)
+    state.set("voicemail_primed", True)
+    state.save()
+
+    source = VoicemailSource(cfg, str(voicemail_db), None)
+    events = list(source.poll(state))
+    assert events
+    topics = {path for path, _ in events}
+    assert "voicemail/received" in topics
+    assert "facetime/audio_message_received" in topics
+    for _, payload in events:
+        assert "transcription" not in payload
+
+
 def test_include_audio_path_false(voicemail_db, voicemail_assets_dir, state_path):
     if voicemail_assets_dir is None:
         pytest.skip("Assets dir fixture not present")

@@ -1,7 +1,7 @@
 [project]
 name = "ha-mqtt-bridge-toolkit"
-version = "0.5.0"
-description = "Shared utilities for MQTT → Home Assistant bridges: HA Discovery payload builders, topic helpers, ISO-8601 time helpers, disk-backed JSONL outbox, threaded paho-mqtt v5 publisher, aiomqtt kwargs builder, YAML+env-var config loader."
+version = "0.6.0"
+description = "Shared utilities for MQTT → Home Assistant bridges: HA Discovery payload builders, topic helpers, ISO-8601 time helpers, disk-backed JSONL outbox, threaded paho-mqtt v5 publisher, aiomqtt kwargs builder, YAML+env-var config loader, HTTP retry-with-backoff."
 requires-python = ">=3.9"
 dependencies = [
     "paho-mqtt>=2.1.0",
@@ -13,9 +13,16 @@ dependencies = [
 yaml = [
     "pyyaml>=6.0.1",
 ]
+# Bridges that poll a cloud REST API (Govee, DroneMobile, Emporia Vue,
+# Flume, Tractive) opt in to `requests` via this extra for
+# `request_with_backoff`. The BMW/macOS/Find My bridges don't need it.
+http = [
+    "requests>=2.31.0",
+]
 dev = [
     "pytest>=8.0.0",
     "pyyaml>=6.0.1",
+    "requests>=2.31.0",
 ]
 
 [build-system]

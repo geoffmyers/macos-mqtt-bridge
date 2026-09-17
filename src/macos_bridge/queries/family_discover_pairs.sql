@@ -1,4 +1,4 @@
--- src/screen_time_bridge/queries/phase_d_discover_pairs.sql
+-- src/macos_bridge/queries/family_discover_pairs.sql
 -- Discover every (user, device) pair that has at least one ZUSAGE row.
 -- Used at agent startup to auto-generate one HA sensor per pair.
 SELECT

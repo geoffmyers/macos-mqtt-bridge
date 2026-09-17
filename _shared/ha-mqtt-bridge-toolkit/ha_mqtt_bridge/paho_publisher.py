@@ -166,6 +166,15 @@ class ThreadedPublisher:
         path = self.health_path
         if not path:
             return
+        if not self._connected.is_set():
+            # Touching the file on a publish that never reached a broker
+            # (paho silently drops it when disconnected — see the publish
+            # flavors below, all of which call this unconditionally) is
+            # exactly what let a healthcheck stay green with the broker
+            # down: the mtime kept advancing on the bridge's own polling
+            # cadence regardless of whether anything was actually
+            # delivered. Only a live connection gets to claim liveness.
+            return
         try:
             # os.utime on a missing file raises FileNotFoundError; create
             # then set mtime in one syscall via open+close + utime, or use
@@ -303,6 +312,11 @@ class ThreadedPublisher:
         if rc == 0:
             log.info("MQTT connected")
             self._connected.set()
+            # A fresh connection is itself proof of life — bump the
+            # heartbeat immediately rather than waiting for the next
+            # publish_* call, so a healthcheck polling right after a
+            # reconnect doesn't see a stale mtime from before the outage.
+            self._touch_health()
             if self.lwt_topic:
                 self._client.publish(
                     self.lwt_topic,
@@ -320,3 +334,58 @@ class ThreadedPublisher:
     ) -> None:
         log.warning("MQTT disconnected: %s", reason_code)
         self._connected.clear()
+
+
+# ---- HA birth/re-discovery -----------------------------------------------------
+
+
+def watch_ha_birth(
+    pub: ThreadedPublisher,
+    on_birth: Callable[[], None],
+    *,
+    discovery_prefix: str = "homeassistant",
+    birth_payload: str = "online",
+) -> None:
+    """Subscribe to Home Assistant's own status topic
+    (``<discovery_prefix>/status``, HA's LWT — ``"online"`` on startup,
+    ``"offline"`` on a clean shutdown) and invoke ``on_birth`` every time
+    HA reports itself back online.
+
+    All five cloud-API bridges published HA Discovery exactly once, at
+    the bridge's own startup. That is fine as long as HA and the broker
+    both keep their state — but a HA restart, a broker that lost its
+    retained messages, or a manual "reload MQTT" leaves those bridges'
+    entities missing until *the bridge* is also restarted, since nothing
+    tells a live bridge that discovery needs to happen again. HA solves
+    this for its own integrations by publishing to ``homeassistant/status``
+    on startup specifically so MQTT integrations can react; this is the
+    toolkit-side half of reacting to it.
+
+    Deliberately opt-in and deliberately dumb: this function does not
+    know what "republish everything" means for any given bridge — that
+    is 100% bridge-supplied via ``on_birth`` (typically: re-run the same
+    discovery-publish routine used at startup, since HA Discovery topics
+    are retained and idempotent to resend, then nudge the next poll
+    cycle to run immediately so current state follows quickly behind).
+    A bridge that never calls this keeps today's startup-only behavior.
+
+    Call once, after ``pub.start()`` (subscriptions registered before a
+    connection exists are replayed automatically on connect — see
+    ``ThreadedPublisher.subscribe``).
+    """
+    topic = f"{discovery_prefix}/status"
+
+    def _handler(_topic: str, payload: bytes) -> None:
+        try:
+            text = payload.decode("utf-8").strip()
+        except UnicodeDecodeError:
+            return
+        if text != birth_payload:
+            return
+        log.info("HA birth message on %s; running on_birth callback", topic)
+        try:
+            on_birth()
+        except Exception:  # noqa: BLE001
+            log.exception("on_birth callback raised")
+
+    pub.subscribe(topic, _handler)

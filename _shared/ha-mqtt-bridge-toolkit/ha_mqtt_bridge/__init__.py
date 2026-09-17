@@ -12,12 +12,17 @@ time helpers, env-var substitution) PLUS I/O helpers:
     asyncio bridges.
   - ``load_yaml_with_env`` / ``substitute_env_vars`` — config helpers
     for bridges that use the YAML-with-``${ENV_VAR}`` pattern.
+  - ``request_with_backoff`` / ``RetryExhaustedError`` — shared
+    retry-with-backoff for bridges polling a cloud REST API (429/5xx).
+  - ``watch_ha_birth`` — opt-in re-publish of HA Discovery (and a
+    bridge-supplied state refresh) when Home Assistant reports itself
+    back online on ``<discovery_prefix>/status``.
 
 Bridges typically import from the package root for the pieces they use.
 The aiomqtt + paho code paths coexist; importing this package will pull
 in ``paho-mqtt`` (required) but not ``aiomqtt`` (optional, asyncio
-bridges) or ``pyyaml`` (optional, YAML config) — those are imported lazily
-where relevant.
+bridges), ``pyyaml`` (optional, YAML config), or ``requests`` (optional,
+cloud-API polling bridges) — those are imported lazily where relevant.
 """
 
 from ha_mqtt_bridge.aiomqtt_helpers import mqtt_client_kwargs
@@ -31,8 +36,9 @@ from ha_mqtt_bridge.discovery import (
     build_device_block,
     build_discovery_payload,
 )
+from ha_mqtt_bridge.http_retry import RetryExhaustedError, request_with_backoff
 from ha_mqtt_bridge.outbox import Outbox
-from ha_mqtt_bridge.paho_publisher import MessageHandler, ThreadedPublisher
+from ha_mqtt_bridge.paho_publisher import MessageHandler, ThreadedPublisher, watch_ha_birth
 from ha_mqtt_bridge.time_utils import (
     epoch_ms_to_iso,
     epoch_to_iso,
@@ -52,6 +58,7 @@ from ha_mqtt_bridge.topics import (
 __all__ = [
     "MessageHandler",
     "Outbox",
+    "RetryExhaustedError",
     "ThreadedPublisher",
     "availability_block",
     "build_device_block",
@@ -68,10 +75,12 @@ __all__ = [
     "now_ms",
     "now_s",
     "register_github_error_reporter",
+    "request_with_backoff",
     "slugify",
     "slugify_hostname",
     "state_topic",
     "substitute_env_vars",
+    "watch_ha_birth",
 ]
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"

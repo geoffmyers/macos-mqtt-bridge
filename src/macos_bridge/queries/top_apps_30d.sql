@@ -1,6 +1,6 @@
--- src/screen_time_bridge/queries/phase_b_top_apps_30d.sql
+-- src/macos_bridge/queries/top_apps_30d.sql
 -- Top-100 apps by usage seconds since :since_mat (caller passes 30d ago).
--- Used by `screen-time-ha-bridge bootstrap-allowlist`. Caller filters by
+-- Used by `macos-mqtt-bridge bootstrap-allowlist`. Caller filters by
 -- prefix/deny-pattern in Python and returns the top N.
 SELECT ZVALUESTRING AS bundle_id,
        SUM(ZENDDATE - ZSTARTDATE) AS total_seconds

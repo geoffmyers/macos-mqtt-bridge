@@ -153,7 +153,6 @@ class VoicemailSource:
 
         uuid_str = _format_uuid(row["record_uuid"])
         audio_path = self._resolve_audio_path(uuid_str) if uuid_str else None
-        transcription = _decode_transcript(row["transcript_blob"])
 
         payload = {
             "pk": pk,
@@ -168,10 +167,17 @@ class VoicemailSource:
             "message_type": int(row["message_type"] or 0),
             "mailbox_type": mbox,
             "transcription_status": int(row["transcription_status"] or 0),
-            "transcription": transcription,
             "is_read": bool(row["is_read"]),
             "sim_id": row["sim_id"],
         }
+        # Applies to both event kinds this source emits — phone voicemails
+        # (voicemail/received) and FaceTime audio-message transcripts
+        # (facetime/audio_message_received) — since both read ZTRANSCRIPT
+        # from the same ZSTOREDMESSAGE row. Mirrors messages.include_text:
+        # skip the (non-trivial) decode entirely when disabled, not just
+        # the publish, and omit the key rather than publish null.
+        if self.cfg.include_transcription:
+            payload["transcription"] = _decode_transcript(row["transcript_blob"])
         if self.cfg.include_audio_path:
             payload["audio_path"] = audio_path
 

@@ -55,7 +55,9 @@ def test_poll_emits_started_and_ended_for_answered_call(calls_db, state_path):
     assert any(p.endswith("/started") for p in paths)
     assert any(p.endswith("/ended") for p in paths)
     for _, payload in events:
-        assert payload["direction"] == "incoming"
+        # direction is Title-cased (see sources/calls.py) so HA renders the
+        # last_*_call_direction sensor naturally as "Incoming" / "Outgoing".
+        assert payload["direction"] == "Incoming"
         assert payload["answered"] is True
         assert payload["service"] in {"com.apple.Telephony", "com.apple.FaceTime"}
 
@@ -82,7 +84,7 @@ def test_poll_emits_missed_for_unanswered_incoming(calls_db, state_path):
     assert not any(p.endswith("/started") for p in paths)
     assert not any(p.endswith("/ended") for p in paths)
     for _, payload in events:
-        assert payload["direction"] == "incoming"
+        assert payload["direction"] == "Incoming"
         assert payload["answered"] is False
 
 
@@ -128,7 +130,7 @@ def test_event_payload_has_required_fields(calls_db, state_path):
     for event_path, payload in events:
         missing = required - payload.keys()
         assert not missing, f"event {event_path} missing keys: {missing}"
-        assert payload["direction"] in {"incoming", "outgoing"}
+        assert payload["direction"] in {"Incoming", "Outgoing"}
         assert isinstance(payload["answered"], bool)
 
 

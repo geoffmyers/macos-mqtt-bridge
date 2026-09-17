@@ -1,18 +1,20 @@
 """Shared pytest fixtures for the merged macos-mqtt-bridge test suite.
 
-Two flavors of fixtures coexist here:
+The comms-source fixtures (messages_db, calls_db, voicemail_db,
+address_book_dir, contact_resolver) are synthetic by default, built by the
+helpers in tests/fixtures/ — always available, including in CI. When a
+private real-data snapshot is staged in `tmp/` (gitignored) — or at the
+directory named by env var MACOS_BRIDGE_FIXTURE_DIR — that snapshot is used
+instead, as an optional extra layer against real-shaped data. Either way,
+every name/number/address the synthetic builders invent is fictional
+(NANP 555-01xx numbers, example.com addresses, Alex/Jordan as the only
+"contacts") and matches tests/fixtures/build_address_book_fixture.py's
+synthetic AddressBook, so contact-enrichment assertions hold under either
+fixture source.
 
-  - Synthetic fixtures (knowledge_fixture, rmadmin_cloud_fixture) built
-    in-memory from the helpers in tests/fixtures/. Used by phase-ticker
-    tests; always available.
-
-  - Real-fixture fixtures (messages_db, calls_db, voicemail_db,
-    address_book_dir, contact_resolver) that read snapshots staged in
-    `tmp/` (gitignored) — overridable via env var
-    MACOS_BRIDGE_FIXTURE_DIR. Tests are skipped if the expected files
-    aren't present (so CI without the snapshots passes the rest of the
-    suite), except the AddressBook, which falls back to a synthetic
-    address book of invented contacts.
+The knowledgeC.db / RMAdminStore-Cloud.sqlite phase-ticker fixtures
+(knowledge_fixture, rmadmin_cloud_fixture) are synthetic-only; there is no
+real-snapshot variant for those.
 """
 
 from __future__ import annotations
@@ -36,8 +38,14 @@ for _root in Path(__file__).resolve().parents[1:3]:
         break
 
 from tests.fixtures.build_address_book_fixture import build_address_book_fixture  # noqa: E402
+from tests.fixtures.build_calls_fixture import build_calls_fixture  # noqa: E402
 from tests.fixtures.build_knowledge_fixture import ANCHOR_TODAY, build_fixture  # noqa: E402
+from tests.fixtures.build_messages_fixture import build_messages_fixture  # noqa: E402
 from tests.fixtures.build_rmadmin_cloud_fixture import build_rmadmin_cloud_fixture  # noqa: E402
+from tests.fixtures.build_voicemail_fixture import (  # noqa: E402
+    build_voicemail_assets_fixture,
+    build_voicemail_fixture,
+)
 
 # config.example.yaml references ${DARWIN_USER_DIR} for the RMAdminStore paths;
 # tests that load_config() the example need this set to *something* even if
@@ -87,23 +95,35 @@ def fixture_dir() -> Path:
 
 
 @pytest.fixture(scope="session")
-def messages_db_src(fixture_dir: Path) -> Path:
+def messages_db_src(fixture_dir: Path, tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """A real chat.db snapshot when one is staged, otherwise a synthetic one
+    built by tests/fixtures/build_messages_fixture.py — so the Messages
+    classification tests run everywhere, including CI."""
     p = fixture_dir / "Messages" / "chat.db"
-    if not p.exists():
-        pytest.skip(f"messages fixture missing at {p}")
-    return p
+    if p.exists():
+        return p
+    db = tmp_path_factory.mktemp("synthetic-messages") / "chat.db"
+    build_messages_fixture(db)
+    return db
 
 
 @pytest.fixture(scope="session")
-def calls_db_src(fixture_dir: Path) -> Path:
+def calls_db_src(fixture_dir: Path, tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """A real CallHistory.storedata snapshot when one is staged, otherwise a
+    synthetic one built by tests/fixtures/build_calls_fixture.py."""
     p = fixture_dir / "CallHistoryDB" / "CallHistory.storedata"
-    if not p.exists():
-        pytest.skip(f"calls fixture missing at {p}")
-    return p
+    if p.exists():
+        return p
+    db = tmp_path_factory.mktemp("synthetic-calls") / "CallHistory.storedata"
+    build_calls_fixture(db)
+    return db
 
 
 @pytest.fixture(scope="session")
-def voicemail_db_src(fixture_dir: Path) -> Path:
+def voicemail_db_src(fixture_dir: Path, tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """A real FaceTimeMessageStore-local.sqlitedb snapshot when one is
+    staged, otherwise a synthetic one built by
+    tests/fixtures/build_voicemail_fixture.py."""
     p = (
         fixture_dir
         / "group.com.apple.FaceTime"
@@ -111,21 +131,35 @@ def voicemail_db_src(fixture_dir: Path) -> Path:
         / "Data Store"
         / "FaceTimeMessageStore-local.sqlitedb"
     )
-    if not p.exists():
-        pytest.skip(f"voicemail fixture missing at {p}")
-    return p
+    if p.exists():
+        return p
+    db = tmp_path_factory.mktemp("synthetic-voicemail") / "FaceTimeMessageStore-local.sqlitedb"
+    build_voicemail_fixture(db)
+    return db
 
 
 @pytest.fixture(scope="session")
-def voicemail_assets_src(fixture_dir: Path) -> Path | None:
-    p = (
+def voicemail_assets_src(
+    fixture_dir: Path, tmp_path_factory: pytest.TempPathFactory
+) -> Path | None:
+    """The real Assets/ snapshot when a real voicemail_db_src is in use,
+    otherwise a synthetic Assets/ tree matched to the synthetic DB's
+    ZRECORDUUID values (never a synthetic tree matched against a *real*
+    DB — the UUIDs wouldn't line up, and the audio-path tests would fail
+    instead of skipping)."""
+    real_db = (
         fixture_dir
         / "group.com.apple.FaceTime"
         / "com.apple.facetimemessagestored"
         / "Data Store"
-        / "Assets"
+        / "FaceTimeMessageStore-local.sqlitedb"
     )
-    return p if p.exists() else None
+    if real_db.exists():
+        p = real_db.parent / "Assets"
+        return p if p.exists() else None
+    assets_dir = tmp_path_factory.mktemp("synthetic-voicemail-assets")
+    build_voicemail_assets_fixture(assets_dir)
+    return assets_dir
 
 
 @pytest.fixture(scope="session")

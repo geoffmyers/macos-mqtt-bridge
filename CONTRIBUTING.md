@@ -18,11 +18,14 @@ pip install -e ".[dev]"
 pytest
 ```
 
-Most of the test suite runs on any platform (config parsing, MQTT payload
-shaping, phase-ticker logic against synthetic fixtures). A handful of tests
-read a real macOS Messages/Calls/AddressBook snapshot staged under `tmp/`
-(gitignored) and skip themselves when that snapshot is not present — you do
-not need a Mac, or anyone's real data, to contribute.
+The whole test suite runs on any platform, including the Messages/Calls/
+Voicemail/AddressBook source tests — they run against synthetic fixtures
+built by `tests/fixtures/build_*_fixture.py` (fictional names, NANP
+555-01xx numbers, `example.com` addresses) by default, so you do not need a
+Mac, or anyone's real data, to contribute. If you stage a real macOS
+Messages/Calls/AddressBook snapshot under `tmp/` (gitignored), those same
+tests run against it instead, as an optional extra layer closer to
+production data.
 
 ## Checks
 
