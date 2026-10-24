@@ -203,6 +203,24 @@ macOS gates each data source behind its own privacy grant, in
 | **Automation → Messages** | Outbound sending (`osascript` driving Messages.app's scripting dictionary). | `comms/messages/send` requests fail; nothing else is affected. |
 | **Location Services**, granted to the `LocationFetcher.app` helper (not the daemon itself) | The location ticker's one-shot `CoreLocation` fix. The helper is ad-hoc signed with its own embedded `Info.plist` specifically so this grant survives a `.venv` rebuild. | The location `device_tracker` doesn't update; `wifi_ssid` reports a self-explanatory placeholder instead of macOS's `<redacted>` (which system_profiler substitutes when Location Services is denied to the caller). |
 
+**Stable permissions with `helpers/launcher`.** macOS ties Full Disk Access, Accessibility and
+Automation to the program's code signature, so a grant to `.venv/bin/python` is lost whenever
+Python is upgraded. `bridge-launcher` starts Python as its child, and macOS attributes the
+child's permission checks to the launcher. Sign the launcher with a certificate you keep, grant
+the launcher instead of Python, and the grant survives upgrades and rebuilds. Because the
+launcher then holds those grants, it lends them to nothing else: it runs only the exact command
+lines compiled into it (`build.sh allow.json`, covered by the signature), only when the program
+and every parent directory are root-owned, from `/`, with an allowlisted environment, and every
+Python command line must use `-I`. Install the bridge and its venv root-owned for this to hold.
+Tests: `./build.sh test-allow.json && ./test.sh`.
+
+**Turning on Messages in iCloud on a running bridge.** The first sync inserts years of history
+into `chat.db` as new rows, which a primed bridge would publish as new messages. Set
+`sources.messages.max_event_age_minutes` (e.g. `60`): rows dated older than that move the bridge's
+position forward without being published. Prime (`init-state`) after the sync has finished where
+you can; if a bridge has already started replaying, stop it and move its `outbox.jsonl` aside
+before restarting, or the outbox sends the queued backlog.
+
 **Automatic error reporting is off by default.** If you set both
 `GITHUB_ERROR_TOKEN` and `GITHUB_REPO` in `.env`, unhandled exceptions are
 reported via a GitHub `repository_dispatch` call to the repo you name —

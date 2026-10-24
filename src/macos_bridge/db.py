@@ -37,6 +37,7 @@ from __future__ import annotations
 import logging
 import shutil
 import sqlite3
+import time
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -69,15 +70,31 @@ def fetch_max(path: str | Path, table: str, column: str) -> int:
         return int(row["m"] or 0)
 
 
-def _backup_via_sqlite_api(source: Path, dest: Path) -> None:
+BACKUP_DEADLINE_SECONDS = 15.0
+
+
+def _backup_via_sqlite_api(source: Path, dest: Path, timeout: float = 5.0) -> None:
     """Take a transactionally-consistent snapshot of ``source`` into ``dest``
-    using SQLite's online backup API. Opens ``source`` read-only, so it never
-    contends with, or is blocked by, the live writer."""
-    src_conn = sqlite3.connect(f"file:{source}?mode=ro", uri=True, timeout=5.0)
+    using SQLite's online backup API. Opens ``source`` read-only.
+
+    Bounded in time: a writer holding an EXCLUSIVE lock (Brave keeps its History database
+    that way while it runs) makes every backup step return SQLITE_BUSY, and Python's
+    ``backup()`` retries that forever. That froze every phase ticker for four days in
+    October 2026. A quick read first raises "database is locked" after ``timeout``, and a
+    progress callback aborts a backup that runs past the deadline; either way the caller
+    falls back to a plain file copy."""
+    src_conn = sqlite3.connect(f"file:{source}?mode=ro", uri=True, timeout=timeout)
     try:
+        src_conn.execute("PRAGMA schema_version").fetchone()
+        deadline = time.monotonic() + BACKUP_DEADLINE_SECONDS
+
+        def _progress(_status: int, _remaining: int, _total: int) -> None:
+            if time.monotonic() > deadline:
+                raise TimeoutError(f"sqlite backup of {source} exceeded {BACKUP_DEADLINE_SECONDS}s")
+
         dst_conn = sqlite3.connect(str(dest))
         try:
-            src_conn.backup(dst_conn)
+            src_conn.backup(dst_conn, progress=_progress)
         finally:
             dst_conn.close()
     finally:

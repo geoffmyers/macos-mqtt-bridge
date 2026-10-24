@@ -15,10 +15,12 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+import time
 from pathlib import Path
 
 from macos_bridge.bootstrap import bootstrap_allowlist, emit_yaml
 from macos_bridge.config import load_config, load_config_with_credentials
+from macos_bridge.export import export_events
 from macos_bridge.hostname import (
     system_friendly_hostname,
     system_hostname_slug,
@@ -50,6 +52,13 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         help="Single dry-run poll; print events to stderr; no MQTT publish",
         parents=[shared],
     )
+    export = sub.add_parser(
+        "export-events",
+        help="Print the last N days of comms events as JSONL (Intake backfill); read-only",
+        parents=[shared],
+    )
+    export.add_argument("--days", type=int, default=14, help="How many days back (default 14)")
+    export.add_argument("--output", help="Write to this file instead of stdout")
 
     boot = sub.add_parser(
         "bootstrap-allowlist",
@@ -119,6 +128,23 @@ def main(argv: list[str] | None = None) -> int:
             cfg, creds=None, host_slug=cfg.bridge.hostname or system_hostname_slug(),
             dry_run=True,
         ).run_once_dry()
+        return 0
+
+    if args.command == "export-events":
+        cfg = load_config(config_path)
+        configure_logging(cfg.bridge.log_path, cfg.bridge.log_level)
+        bridge = Bridge(
+            cfg, creds=None, host_slug=cfg.bridge.hostname or system_hostname_slug(),
+            dry_run=True,
+        )
+        cutoff = time.time() - args.days * 86400
+        out = open(args.output, "w", encoding="utf-8") if args.output else sys.stdout
+        try:
+            n = export_events(bridge.sources, cutoff, cfg.mqtt.topic_prefix, bridge._host_slug, out.write)
+        finally:
+            if args.output:
+                out.close()
+        print(f"# exported {n} event(s) from the last {args.days} day(s)", file=sys.stderr)
         return 0
 
     # run

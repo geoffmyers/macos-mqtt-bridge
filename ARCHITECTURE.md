@@ -104,6 +104,42 @@ monolithic "collect everything" loop; see [Configuration](README.md#configuratio
 for the exact list with defaults, or `config.example.yaml` for every option
 inline.
 
+## The Screen Time phases
+
+Four of the tickers carry Screen Time, and they came from an earlier
+stand-alone Screen Time bridge that was merged into this one:
+
+| Phase | Ticker | Data | Source | Default cadence |
+|---|---|---|---|---|
+| A | `aggregates` | Daily total, pickups, top app | `knowledgeC.db` | 15 min |
+| B | `per_app` | Per-app daily usage for an allow-list (`bootstrap-allowlist` proposes one from the last 30 days) | `knowledgeC.db` | 60 s |
+| C | `focused_app` | The app in front right now | `lsappinfo` | ~3 s poll, publish on change |
+| D | `family` | Family Sharing members' Screen Time | `RMAdminStore-Cloud.sqlite` | 5 min, off by default |
+
+- **Sources.** `knowledgeC.db` lives in `~/Library/Application Support/Knowledge/`;
+  `RMAdminStore-Local.sqlite` and `RMAdminStore-Cloud.sqlite` live in
+  `$DARWIN_USER_DIR/com.apple.ScreenTimeAgent/Store/`. Phase A reads
+  `knowledgeC.db` (the `/app/usage` stream) rather than RMAdminStore-Local,
+  whose roll-ups can lag iCloud sync.
+- **Phase C was designed as a ~3 s poll of the `knowledgeC.db` WAL mtime**,
+  but macOS 12 and later write an `/app/usage` row only after focus LEAVES an
+  app, so the database can only say which app last lost focus. It reads
+  `lsappinfo` instead, which needs neither Full Disk Access nor Accessibility.
+- **Phase D runs only on the Family Sharing organizer's Mac:** it needs both
+  `family.enabled` and `family.is_family_organizer`, since only the organizer's
+  `RMAdminStore-Cloud.sqlite` holds the other members' synced usage.
+- **Every tick re-derives "today so far"** from a fresh query (local midnight
+  via `astimezone()`, so DST needs no special case). There are no in-memory
+  counters, so a crash mid-tick loses nothing, and Home Assistant's recorder is
+  the history.
+- **Reads go through a snapshot.** `db.py` copies the database with its `-wal`
+  and `-shm` sidecars into a work directory and opens the copy with
+  `mode=ro&immutable=1`, so a write by CoreDuet or ScreenTimeAgent mid-read
+  cannot tear the result.
+- The `LaunchAgent` (not a `LaunchDaemon`) matters: a root daemon sees a
+  different `DARWIN_USER_DIR` and does not inherit the user's Full Disk Access
+  grant for these files.
+
 ## Configuration and identity
 
 `config.py`'s `pydantic` models (`extra="forbid"`, so a typo in `config.yaml`

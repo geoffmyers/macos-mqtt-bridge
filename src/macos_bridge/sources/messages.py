@@ -14,13 +14,14 @@ Detects new rows by tracking the max ROWID of the `message` table.
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Iterable
 
 from macos_bridge.config import MessagesSource as MessagesConfig
 from macos_bridge.contacts import ContactResolver
 from macos_bridge.db import fetch_max, open_ro
 from macos_bridge.state import State
-from macos_bridge.time_utils import mac_absolute_to_iso
+from macos_bridge.time_utils import MAC_EPOCH_OFFSET, mac_absolute_to_iso, mac_absolute_to_unix
 
 log = logging.getLogger(__name__)
 
@@ -98,6 +99,20 @@ class MessagesSource:
         state.set("messages_primed", True)
         log.info("messages init-state primed at rowid=%d", max_id)
 
+    STATE_KEY = "messages_last_rowid"
+    PRIMED_KEY = "messages_primed"
+
+    def id_before(self, cutoff_unix: float) -> int:
+        """The last ROWID dated before the cutoff (chat.db dates are nanoseconds since 2001 on
+        current macOS, seconds on old rows). Used by `export-events`."""
+        cutoff = cutoff_unix - MAC_EPOCH_OFFSET
+        with open_ro(self.db_path) as conn:
+            row = conn.execute(
+                "SELECT COALESCE(MAX(ROWID), 0) FROM message WHERE "
+                "(CASE WHEN date > 100000000000 THEN date / 1000000000.0 ELSE date END) < ?",
+                (cutoff,)).fetchone()
+        return int(row[0])
+
     def poll(self, state: State) -> Iterable[tuple[str, dict]]:
         last = int(state.get("messages_last_rowid", 0) or 0)
         primed = bool(state.get("messages_primed", False))
@@ -124,12 +139,22 @@ class MessagesSource:
             )
             return
 
+        cutoff = None
+        if self.cfg.max_event_age_minutes:
+            cutoff = time.time() - self.cfg.max_event_age_minutes * 60
         new_max = last
+        skipped = 0
         for row in rows:
             rowid = int(row["rowid"])
             new_max = max(new_max, rowid)
+            if cutoff is not None and (row["date"] is None or mac_absolute_to_unix(row["date"]) < cutoff):
+                skipped += 1
+                continue
             yield self._row_to_event(row)
 
+        if skipped:
+            log.info("messages: %d row(s) older than %d min not published (history arriving, e.g. an "
+                     "iCloud sync)", skipped, self.cfg.max_event_age_minutes)
         if new_max > last:
             state.set("messages_last_rowid", new_max)
 

@@ -684,15 +684,27 @@ class Bridge:
         )
         while not self._stop.is_set():
             try:
-                for source in self.sources:
-                    for event_path, payload in source.poll(self.state):
-                        self._emit(event_path, payload)
-                self.state.save()
-                self._drain_outbox()
+                self._comms_cycle()
             except Exception:
                 log.exception("error during comms poll cycle (continuing)")
             self._stop.wait(self.cfg.bridge.poll_interval_seconds)
         log.info("comms polling stopped")
+
+    def _comms_cycle(self) -> None:
+        """Poll every comms source once, save the cursors, drain the outbox.
+
+        An event that cannot be emitted is logged and dropped, so one bad row can never stall
+        the feed: until 2026-10-10 a single call record with a bytes conversation_id raised on
+        every cycle for four months, the cursors were never saved again and the outbox was
+        never drained."""
+        for source in self.sources:
+            for event_path, payload in source.poll(self.state):
+                try:
+                    self._emit(event_path, payload)
+                except Exception:
+                    log.exception("dropping one %s event that could not be emitted", event_path)
+        self.state.save()
+        self._drain_outbox()
 
     # ---- supervisor ---------------------------------------------------------
 

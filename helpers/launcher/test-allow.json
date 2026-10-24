@@ -1,0 +1,36 @@
+{
+  "commands": [
+    [
+      "/bin/sh",
+      "-c",
+      "exit 7"
+    ],
+    [
+      "/bin/echo",
+      "hello"
+    ],
+    [
+      "/bin/sleep",
+      "30"
+    ],
+    [
+      "/bin/pwd"
+    ],
+    [
+      "/usr/local/libexec/bridge-launcher-test/printenv"
+    ],
+    [
+      "/nonexistent/program"
+    ],
+    [
+      "/tmp/bridge-launcher-test/user-owned.sh"
+    ],
+    [
+      "/bin/sh",
+      "/tmp/bridge-launcher-test/user-script.sh"
+    ]
+  ],
+  "env": [
+    "MACOS_BRIDGE_TEST"
+  ]
+}

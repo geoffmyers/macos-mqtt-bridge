@@ -117,3 +117,26 @@ def test_read_only_copy_consistent_snapshot_under_concurrent_wal_writer(tmp_path
 
     assert not errors, f"concurrent writer thread hit errors: {errors}"
     assert snapshots_taken == 20
+
+
+def test_read_only_copy_does_not_hang_on_an_exclusively_locked_db(source_db: Path, tmp_path: Path):
+    """Brave holds its History database with an exclusive lock while it runs. The online backup API
+    then reports SQLITE_BUSY forever and Python's backup() retries without end; before 2026-10-10
+    that froze every phase ticker for four days. The snapshot must fall back to a file copy."""
+    holder = sqlite3.connect(source_db)
+    holder.execute("PRAGMA locking_mode=EXCLUSIVE")
+    holder.execute("CREATE TABLE IF NOT EXISTS lock_probe (x)")
+    holder.execute("INSERT INTO lock_probe VALUES (1)")
+    holder.commit()  # in EXCLUSIVE mode the lock is kept after the commit
+    result: dict = {}
+
+    def snapshot() -> None:
+        with read_only_copy(source_db, tmp_path / "work") as conn:
+            result["rows"] = conn.execute("SELECT COUNT(*) FROM lock_probe").fetchone()[0]
+
+    worker = threading.Thread(target=snapshot, daemon=True)
+    worker.start()
+    worker.join(timeout=20)
+    holder.close()
+    assert not worker.is_alive(), "read_only_copy hung on a locked database"
+    assert result["rows"] == 1

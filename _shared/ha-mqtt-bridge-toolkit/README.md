@@ -190,6 +190,10 @@ depend on.
 
 ## Version history
 
+- **0.6.0** (2026-09-17, `8bbc51246`) — `http_retry` (`request_with_backoff` +
+  `RetryExhaustedError`, 429/5xx backoff for the cloud-API bridges); `watch_ha_birth`
+  re-publishes discovery when Home Assistant restarts; the health file is touched only
+  while the broker is connected; `ThreadedPublisher` accepts TLS (`tls=`, `ca_file=`).
 - **0.5.0** — `app_helpers` (`configure_logging` + `register_github_error_reporter`),
   the startup boilerplate the Docker bridges each repeated.
 - **0.4.0** — `aiomqtt_helpers` and `config_helpers`.

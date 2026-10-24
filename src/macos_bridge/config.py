@@ -116,6 +116,10 @@ class MessagesSource(BaseModel):
     db_path: str = "~/Library/Messages/chat.db"
     include_text: bool = True
     include_attributed_body_fallback: bool = True
+    # Publish only messages dated within this many minutes of the poll; older rows still move the
+    # position forward. A first "Messages in iCloud" sync inserts years of history as NEW rowids,
+    # which would otherwise all go out as new events. None = publish every new row.
+    max_event_age_minutes: int | None = Field(default=None, ge=1)
 
 
 class CallsSource(BaseModel):

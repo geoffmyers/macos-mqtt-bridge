@@ -16,13 +16,14 @@ real-time alternative on phone/{ringing,outgoing_started,connected,realtime_ende
 from __future__ import annotations
 
 import logging
+import uuid
 from collections.abc import Iterable
 
 from macos_bridge.config import CallsSource as CallsConfig
 from macos_bridge.contacts import ContactResolver
 from macos_bridge.db import fetch_max, open_ro
 from macos_bridge.state import State
-from macos_bridge.time_utils import mac_absolute_to_iso, mac_absolute_to_unix, unix_to_iso
+from macos_bridge.time_utils import MAC_EPOCH_OFFSET, mac_absolute_to_iso, mac_absolute_to_unix, unix_to_iso
 
 log = logging.getLogger(__name__)
 
@@ -74,6 +75,16 @@ class CallsSource:
         state.set("calls_last_pk", max_id)
         state.set("calls_primed", True)
         log.info("calls init-state primed at pk=%d", max_id)
+
+    STATE_KEY = "calls_last_pk"
+    PRIMED_KEY = "calls_primed"
+
+    def id_before(self, cutoff_unix: float) -> int:
+        """The last Z_PK dated before the cutoff (ZDATE is seconds since 2001). Used by `export-events`."""
+        with open_ro(self.db_path) as conn:
+            row = conn.execute("SELECT COALESCE(MAX(Z_PK), 0) FROM ZCALLRECORD WHERE ZDATE < ?",
+                               (cutoff_unix - MAC_EPOCH_OFFSET,)).fetchone()
+        return int(row[0])
 
     def poll(self, state: State) -> Iterable[tuple[str, dict]]:
         last = int(state.get("calls_last_pk", 0) or 0)
@@ -159,7 +170,7 @@ class CallsSource:
             "ended_at": unix_to_iso(end_unix),
             "was_emergency": bool(row["was_emergency"]),
             "has_message": bool(row["has_message"]),
-            "conversation_id": row["conversation_id"],
+            "conversation_id": _conversation_id(row["conversation_id"]),
         }
         contact = self.contacts.resolve_handle(address) if self.contacts else None
         if contact is not None:
@@ -201,3 +212,12 @@ def _decode_address(value) -> str | None:
         except UnicodeDecodeError:
             return value.hex()
     return str(value)
+
+
+def _conversation_id(value: object) -> str | None:
+    """ZCONVERSATIONID is NULL, text, or (on some calls) a 16-byte UUID blob. Bytes cannot be
+    JSON-serialised; until 2026-10-10 one such call stalled the whole comms feed for four months."""
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        raw = bytes(value)
+        return str(uuid.UUID(bytes=raw)) if len(raw) == 16 else raw.hex()
+    return value  # type: ignore[return-value]

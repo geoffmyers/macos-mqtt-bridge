@@ -250,3 +250,48 @@ def test_edited_messages_route_to_edited_topic(messages_db, state_path):
     event_path, payload = matching[0]
     assert event_path == "messages/edited"
     assert payload["edited_at"] is not None
+
+
+def _copy_with_last_row_dated_now(messages_db, tmp_path):
+    """A writable copy of the fixture whose newest message is dated now (nanoseconds since 2001)."""
+    import shutil
+    import time
+
+    from macos_bridge.time_utils import MAC_EPOCH_OFFSET
+
+    dst = tmp_path / "chat-now.db"
+    shutil.copy(messages_db, dst)
+    now_ns = int((time.time() - MAC_EPOCH_OFFSET) * 1_000_000_000)
+    with sqlite3.connect(dst) as conn:
+        conn.execute("UPDATE message SET date = ? WHERE ROWID = (SELECT MAX(ROWID) FROM message)", (now_ns,))
+    return dst
+
+
+def test_max_event_age_skips_old_rows_but_advances(messages_db, state_path):
+    """A first iCloud sync inserts years of history as NEW rowids: with max_event_age_minutes set,
+    rows dated before the cutoff move the position forward but publish nothing."""
+    max_rowid = _max_rowid(messages_db)
+    state = State(str(state_path))
+    state.set("messages_last_rowid", max_rowid - 5)
+    state.set("messages_primed", True)
+    state.save()
+    source = MessagesSource(MessagesConfig(max_event_age_minutes=60), str(messages_db))
+    assert list(source.poll(state)) == []
+    assert state.get("messages_last_rowid") == max_rowid
+
+
+def test_max_event_age_still_publishes_a_recent_row(messages_db, state_path, tmp_path):
+    db = _copy_with_last_row_dated_now(messages_db, tmp_path)
+    max_rowid = _max_rowid(db)
+    state = State(str(state_path))
+    state.set("messages_last_rowid", max_rowid - 5)
+    state.set("messages_primed", True)
+    state.save()
+    source = MessagesSource(MessagesConfig(max_event_age_minutes=60), str(db))
+    events = list(source.poll(state))
+    assert [p["rowid"] for _, p in events] == [max_rowid]
+    assert state.get("messages_last_rowid") == max_rowid
+
+
+def test_max_event_age_defaults_off():
+    assert MessagesConfig().max_event_age_minutes is None

@@ -62,6 +62,7 @@ sources:
     db_path: ~/Library/Messages/chat.db
     include_text: true                            # set false to omit message body (privacy)
     include_attributed_body_fallback: true        # extract plain text from attributedBody when text is NULL
+    # max_event_age_minutes: 60                  # publish only messages dated within N min (a first Messages-in-iCloud sync inserts years of history as new rows)
 
   calls:
     enabled: true

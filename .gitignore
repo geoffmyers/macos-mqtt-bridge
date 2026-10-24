@@ -18,6 +18,9 @@ tmp/
 
 # Swift build output for the CallObserver helper
 helpers/call-observer/.build/
+# Swift build output for bridge-launcher
+helpers/launcher/.build/
+helpers/launcher/Sources/bridge-launcher/Allowlist.swift
 
 # Swift build output for the LocationFetcher helper
 helpers/location-fetcher/.build/

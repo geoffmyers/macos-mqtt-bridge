@@ -205,3 +205,32 @@ def test_seed_state_mirrors_no_publisher_is_safe(bridge: Bridge):
     bridge.publisher = None
     bridge.comms_discovery = None
     bridge._seed_state_mirrors()  # must not raise
+
+
+def test_one_unemittable_event_does_not_stall_the_comms_feed(bridge: Bridge, monkeypatch, tmp_path):
+    """One event that cannot be emitted is dropped with a log line; the rest of the cycle is
+    published and the cursor is saved, so the same bad row is not retried forever."""
+    import json
+
+    from macos_bridge.state import State
+
+    bridge.state = State(str(tmp_path / "state.json"))
+
+    class Source:
+        def poll(self, state):
+            for n in (1, 2, 3):
+                state.set("fake_last", n)
+                yield "messages/received", {"n": n}
+
+    bridge.sources = [Source()]
+    emitted = []
+
+    def emit(event_path, payload):
+        if payload["n"] == 2:
+            raise TypeError("Object of type bytes is not JSON serializable")
+        emitted.append(payload["n"])
+
+    monkeypatch.setattr(bridge, "_emit", emit)
+    bridge._comms_cycle()
+    assert emitted == [1, 3]
+    assert json.loads((tmp_path / "state.json").read_text())["fake_last"] == 3

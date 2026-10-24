@@ -28,7 +28,7 @@ from macos_bridge.config import VoicemailSource as VoicemailConfig
 from macos_bridge.contacts import ContactResolver
 from macos_bridge.db import fetch_max, open_ro
 from macos_bridge.state import State
-from macos_bridge.time_utils import mac_absolute_to_iso
+from macos_bridge.time_utils import MAC_EPOCH_OFFSET, mac_absolute_to_iso
 
 log = logging.getLogger(__name__)
 
@@ -83,6 +83,16 @@ class VoicemailSource:
         state.set("voicemail_last_pk", max_pk)
         state.set("voicemail_primed", True)
         log.info("voicemail init-state primed at pk=%d", max_pk)
+
+    STATE_KEY = "voicemail_last_pk"
+    PRIMED_KEY = "voicemail_primed"
+
+    def id_before(self, cutoff_unix: float) -> int:
+        """The last Z_PK created before the cutoff (seconds since 2001). Used by `export-events`."""
+        with open_ro(self.db_path) as conn:
+            row = conn.execute("SELECT COALESCE(MAX(Z_PK), 0) FROM ZSTOREDMESSAGE WHERE ZDATECREATED < ?",
+                               (cutoff_unix - MAC_EPOCH_OFFSET,)).fetchone()
+        return int(row[0])
 
     def poll(self, state: State) -> Iterable[tuple[str, dict]]:
         last = int(state.get("voicemail_last_pk", 0) or 0)

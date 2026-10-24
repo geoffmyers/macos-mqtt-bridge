@@ -165,3 +165,23 @@ def test_emit_started_event_can_be_disabled(calls_db, state_path):
     assert not any(p.endswith("/started") for p in paths)
     # ended and missed are still produced
     assert any(p.endswith("/ended") or p.endswith("/missed") for p in paths)
+
+
+def test_a_blob_conversation_id_is_emitted_as_a_uuid_string(calls_db, state_path):
+    """macOS stores ZCONVERSATIONID as a 16-byte UUID blob on some calls. Emitted raw it is bytes,
+    which cannot be JSON-serialised, and before 2026-10-10 that stalled the whole comms feed for
+    four months. It must come out as the UUID's string form."""
+    import json
+
+    with sqlite3.connect(calls_db) as conn:
+        pk = conn.execute("SELECT MAX(Z_PK) FROM ZCALLRECORD").fetchone()[0]
+        conn.execute("UPDATE ZCALLRECORD SET ZCONVERSATIONID = ? WHERE Z_PK = ?",
+                     (bytes.fromhex("4B7FF6786E8E446BBE51EB3EA0BF0036"), pk))
+    state = State(str(state_path))
+    state.set("calls_last_pk", pk - 1)
+    state.set("calls_primed", True)
+    events = [e for e in CallsSource(CallsConfig(), str(calls_db)).poll(state) if e[1].get("pk") == pk]
+    assert events
+    for _, payload in events:
+        assert payload["conversation_id"] == "4b7ff678-6e8e-446b-be51-eb3ea0bf0036"
+        json.dumps(payload)
